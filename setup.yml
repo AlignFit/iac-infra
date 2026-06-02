@@ -1,0 +1,12 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Setup Align Fit
+
+Resources:
+  SetupBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "setup-bucket-${AWS::AccountId}"
+      Tags:
+        - Key: Name
+          Value: SetupBucket

@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: API Align Fit
+
+Parameters:
+  SetupBucket:
+    Type: String
+
+Resources:
+  #################################################
+  # LAMBDA UPLOAD
+  #################################################
+
+  UploadVideoFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: upload-video
+
+      Runtime: python3.11
+
+      Handler: upload_video.lambda_handler
+
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/LabRole
+
+      Code:
+        S3Bucket: !Ref SetupBucket
+        S3Key: upload_video.zip
+
+      Timeout: 60
+
+      MemorySize: 512
+
+      Environment:
+        Variables:
+          RAW_BUCKET:
+            Fn::ImportValue: RawBucketName
+
+  #################################################
+  # API GATEWAY
+  #################################################
+
+  UploadApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: align-fit-upload-api
+
+      BinaryMediaTypes:
+        - video/mp4
+
+  UploadResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref UploadApi
+      ParentId: !GetAtt UploadApi.RootResourceId
+      PathPart: upload
+
+  UploadMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UploadApi
+      ResourceId: !Ref UploadResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+
+        Uri:
+          Fn::Sub:
+            - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaArn}/invocations
+            - LambdaArn: !GetAtt UploadVideoFunction.Arn
+
+  UploadLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref UploadVideoFunction
+      Principal: apigateway.amazonaws.com
+
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UploadApi}/*/POST/upload
+
+  #################################################
+  # DEPLOYMENT
+  #################################################
+
+  UploadApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - UploadMethod
+    Properties:
+      RestApiId: !Ref UploadApi
+
+  UploadApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      StageName: prod
+      RestApiId: !Ref UploadApi
+      DeploymentId: !Ref UploadApiDeployment
+
+Outputs:
+  UploadApiId:
+    Value: !Ref UploadApi
+
+  UploadApiUrl:
+    Description: Endpoint para upload
+    Value: !Sub
+      - https://${ApiId}.execute-api.${AWS::Region}.amazonaws.com/prod/upload
+      - ApiId: !Ref UploadApi

@@ -1,0 +1,51 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Storage Align Fit
+
+Resources:
+  RawBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub raw-video-bucket-${AWS::AccountId}
+
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
+
+      Tags:
+        - Key: Name
+          Value: RawVideoBucket
+
+  TrustedBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub trusted-video-bucket-${AWS::AccountId}
+
+      Tags:
+        - Key: Name
+          Value: TrustedVideoBucket
+
+  ClientBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub client-video-bucket-${AWS::AccountId}
+
+      Tags:
+        - Key: Name
+          Value: ClientVideoBucket
+
+Outputs:
+  RawBucketName:
+    Value: !Ref RawBucket
+    Export:
+      Name: RawBucketName
+
+  TrustedBucketName:
+    Value: !Ref TrustedBucket
+    Export:
+      Name: TrustedBucketName
+
+  ClientBucketName:
+    Value: !Ref ClientBucket
+    Export:
+      Name: ClientBucketName

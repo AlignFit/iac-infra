@@ -1,0 +1,130 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Processing Align Fit
+
+Parameters:
+  EcrImageUri:
+    Type: String
+    Description: URI da imagem no ECR
+
+Resources:
+  #################################################
+  # SQS
+  #################################################
+
+  VideoProcessingDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: video-processing-dlq
+
+  VideoProcessingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: video-processing-queue
+
+      VisibilityTimeout: 900
+
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt VideoProcessingDLQ.Arn
+        maxReceiveCount: 3
+
+  VideoProcessingQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref VideoProcessingQueue
+
+      PolicyDocument:
+        Version: "2012-10-17"
+
+        Statement:
+          - Effect: Allow
+
+            Principal:
+              Service: events.amazonaws.com
+
+            Action:
+              - sqs:SendMessage
+
+            Resource: !GetAtt VideoProcessingQueue.Arn
+
+  #################################################
+  # EVENTBRIDGE
+  #################################################
+
+  RawVideoCreatedRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: raw-video-created-rule
+
+      State: ENABLED
+
+      EventPattern:
+        source:
+          - aws.s3
+
+        detail-type:
+          - Object Created
+
+        detail:
+          bucket:
+            name:
+              - Fn::ImportValue: RawBucketName
+
+      Targets:
+        - Id: QueueTarget
+
+          Arn: !GetAtt VideoProcessingQueue.Arn
+
+  #################################################
+  # PROCESSOR LAMBDA
+  #################################################
+
+  VideoProcessorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: video-processor
+
+      PackageType: Image
+
+      Code:
+        ImageUri: !Ref EcrImageUri
+
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/LabRole
+
+      Timeout: 900
+
+      MemorySize: 10240
+
+      EphemeralStorage:
+        Size: 10240
+
+      Environment:
+        Variables:
+          RAW_BUCKET:
+            Fn::ImportValue: RawBucketName
+
+          TRUSTED_BUCKET:
+            Fn::ImportValue: TrustedBucketName
+
+  #################################################
+  # SQS -> LAMBDA
+  #################################################
+
+  VideoProcessorEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      BatchSize: 1
+
+      Enabled: true
+
+      EventSourceArn: !GetAtt VideoProcessingQueue.Arn
+
+      FunctionName: !Ref VideoProcessorFunction
+
+Outputs:
+  ProcessorLambda:
+    Value: !Ref VideoProcessorFunction
+
+  QueueArn:
+    Value: !GetAtt VideoProcessingQueue.Arn
