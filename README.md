@@ -71,11 +71,8 @@ aws lambda update-function-code `
   --s3-key trigger_client_to_dynamo.zip
 ```
 
-## Remover arquivos S3
+### Remover arquivos S3
 
 ```bash
 aws s3 rm s3://raw-bucket-{id da conta AWS}/ --recursive
 ```
-
-aws ecr create-repository `
---repository-name video-processor
