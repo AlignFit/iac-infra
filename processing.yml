@@ -5,12 +5,16 @@ Description: Processing Align Fit
 Parameters:
   EcrImageUri:
     Type: String
-    Description: URI da imagem no ECR
+    Description: URI da imagem Docker no ECR (contém YOLO + user_dataset_generator)
+
+  SetupBucket:
+    Type: String
+    Description: Bucket onde estão os ZIPs das Lambdas de inferência e resultado
 
 Resources:
-  #################################################
-  # SQS
-  #################################################
+  ###########################################################
+  # SQS — PIPELINE 1: Raw → keypoints (YOLO)
+  ###########################################################
 
   VideoProcessingDLQ:
     Type: AWS::SQS::Queue
@@ -21,9 +25,7 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: video-processing-queue
-
       VisibilityTimeout: 900
-
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt VideoProcessingDLQ.Arn
         maxReceiveCount: 3
@@ -33,98 +35,168 @@ Resources:
     Properties:
       Queues:
         - !Ref VideoProcessingQueue
-
       PolicyDocument:
         Version: "2012-10-17"
-
         Statement:
           - Effect: Allow
-
             Principal:
               Service: events.amazonaws.com
-
-            Action:
-              - sqs:SendMessage
-
+            Action: sqs:SendMessage
             Resource: !GetAtt VideoProcessingQueue.Arn
 
-  #################################################
-  # EVENTBRIDGE
-  #################################################
+  ###########################################################
+  # SQS — PIPELINE 2: Trusted CSV → inferência (XGBoost)
+  ###########################################################
+
+  InferenceDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: inference-dlq
+
+  InferenceQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: inference-queue
+      VisibilityTimeout: 120
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt InferenceDLQ.Arn
+        maxReceiveCount: 3
+
+  InferenceQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref InferenceQueue
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt InferenceQueue.Arn
+
+  ###########################################################
+  # EVENTBRIDGE — Raw bucket → VideoProcessingQueue
+  ###########################################################
 
   RawVideoCreatedRule:
     Type: AWS::Events::Rule
     Properties:
       Name: raw-video-created-rule
-
       State: ENABLED
-
       EventPattern:
         source:
           - aws.s3
-
         detail-type:
           - Object Created
-
         detail:
           bucket:
             name:
               - Fn::ImportValue: RawBucketName
-
       Targets:
-        - Id: QueueTarget
-
+        - Id: VideoProcessingQueueTarget
           Arn: !GetAtt VideoProcessingQueue.Arn
 
-  #################################################
-  # PROCESSOR LAMBDA
-  #################################################
+  ###########################################################
+  # EVENTBRIDGE — Trusted bucket → InferenceQueue
+  ###########################################################
+
+  TrustedCsvCreatedRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: trusted-csv-created-rule
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - Object Created
+        detail:
+          bucket:
+            name:
+              - Fn::ImportValue: TrustedBucketName
+          object:
+            key:
+              - prefix: "datasets/"
+      Targets:
+        - Id: InferenceQueueTarget
+          Arn: !GetAtt InferenceQueue.Arn
+
+  ###########################################################
+  # LAMBDA — Processadora de vídeo (YOLO Pose → CSV)
+  # Empacotada como imagem Docker no ECR
+  ###########################################################
 
   VideoProcessorFunction:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: video-processor
-
       PackageType: Image
-
       Code:
         ImageUri: !Ref EcrImageUri
-
       Role: !Sub arn:aws:iam::${AWS::AccountId}:role/LabRole
-
       Timeout: 900
-
-      MemorySize: 10240
-
+      MemorySize: 4096
       EphemeralStorage:
-        Size: 10240
-
+        Size: 4096
       Environment:
         Variables:
           RAW_BUCKET:
             Fn::ImportValue: RawBucketName
-
           TRUSTED_BUCKET:
             Fn::ImportValue: TrustedBucketName
-
-  #################################################
-  # SQS -> LAMBDA
-  #################################################
 
   VideoProcessorEventSourceMapping:
     Type: AWS::Lambda::EventSourceMapping
     Properties:
       BatchSize: 1
-
       Enabled: true
-
       EventSourceArn: !GetAtt VideoProcessingQueue.Arn
-
       FunctionName: !Ref VideoProcessorFunction
+
+  ###########################################################
+  # LAMBDA — Inferência XGBoost (exercício + execução)
+  ###########################################################
+
+  InferenceFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: inference
+      Runtime: python3.11
+      Handler: inference.lambda_handler
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/LabRole
+      Code:
+        S3Bucket: !Ref SetupBucket
+        S3Key: inference.zip
+      Timeout: 120
+      MemorySize: 1024
+      Environment:
+        Variables:
+          TRUSTED_BUCKET:
+            Fn::ImportValue: TrustedBucketName
+          MODELS_BUCKET:
+            Fn::ImportValue: ModelsBucketName
+          RESULTS_BUCKET:
+            Fn::ImportValue: ResultsBucketName
+
+  InferenceEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      BatchSize: 1
+      Enabled: true
+      EventSourceArn: !GetAtt InferenceQueue.Arn
+      FunctionName: !Ref InferenceFunction
 
 Outputs:
   ProcessorLambda:
     Value: !Ref VideoProcessorFunction
 
-  QueueArn:
+  InferenceLambda:
+    Value: !Ref InferenceFunction
+
+  VideoProcessingQueueArn:
     Value: !GetAtt VideoProcessingQueue.Arn
+
+  InferenceQueueArn:
+    Value: !GetAtt InferenceQueue.Arn

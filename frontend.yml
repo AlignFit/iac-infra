@@ -1,0 +1,141 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Frontend EC2 - Align Fit (React + Vite + Nginx)
+
+Parameters:
+  UploadApiUrl:
+    Type: String
+    Description: URL do endpoint POST /upload (gerado pela stack ApiAlignFitStack)
+
+  ResultApiUrl:
+    Type: String
+    Description: URL base do endpoint GET /result (without file_id)
+    # Exemplo: https://abc123.execute-api.us-east-1.amazonaws.com/prod/result
+
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    AllowedValues:
+      - t3.micro
+      - t3.small
+    Description: Tipo da instância EC2
+
+  DeployVersion:
+    Type: String
+    Default: "1"
+    Description: >
+      Incremente este valor para forçar a recriação da EC2 e re-executar o
+      UserData (útil para atualizar o código do frontend via redeploy do CFN).
+
+  # AMI Amazon Linux 2023 (us-east-1) — atualize se mudar de região
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+Resources:
+  ###########################################################
+  # SECURITY GROUP — libera HTTP (80) de qualquer lugar
+  ###########################################################
+
+  FrontendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: AlignFit Frontend HTTP Publico
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: AlignFitFrontendSG
+
+  ###########################################################
+  # EC2 — UserData faz build do React e sobe o nginx
+  ###########################################################
+
+  FrontendInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref AmiId
+      SecurityGroupIds:
+        - !Ref FrontendSecurityGroup
+
+      Tags:
+        - Key: Name
+          Value: AlignFitFrontend
+        - Key: DeployVersion
+          Value: !Ref DeployVersion
+
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -e
+
+          # ── Atualizar sistema e instalar dependências ──────────────────
+          dnf update -y
+          dnf install -y git nginx
+
+          # ── Instalar Node.js 20 via nvm ───────────────────────────────
+          curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+          dnf install -y nodejs
+
+          # ── Clonar repositório do frontend ────────────────────────────
+          cd /opt
+          git clone https://github.com/AlignFit/align-fit-web.git align-fit-web
+          cd align-fit-web
+
+          # ── Criar arquivo .env com as URLs da API ─────────────────────
+          cat > .env <<EOF
+          VITE_UPLOAD_API_URL=${UploadApiUrl}
+          VITE_RESULT_API_URL=${ResultApiUrl}
+          EOF
+
+          # ── Instalar dependências e gerar build de produção ───────────
+          npm ci
+          npm run build
+
+          # ── Copiar build para o diretório do nginx ────────────────────
+          cp -r dist/* /usr/share/nginx/html/
+
+          # ── Configurar nginx para SPA (React Router) ──────────────────
+          cat > /etc/nginx/conf.d/alignfit.conf <<'NGINX'
+          server {
+              listen 80;
+              server_name _;
+              root /usr/share/nginx/html;
+              index index.html;
+
+              # Todas as rotas caem no index.html (SPA)
+              location / {
+                  try_files $uri $uri/ /index.html;
+              }
+
+              # Cache de assets estáticos
+              location ~* \.(js|css|png|svg|ico|woff2?)$ {
+                  expires 1y;
+                  add_header Cache-Control "public, immutable";
+              }
+          }
+          NGINX
+
+          # ── Remover config default do nginx ──────────────────────────
+          rm -f /etc/nginx/conf.d/default.conf
+
+          # ── Habilitar e iniciar nginx ─────────────────────────────────
+          systemctl enable nginx
+          systemctl start nginx
+
+Outputs:
+  FrontendPublicIp:
+    Description: IP público da instância EC2
+    Value: !GetAtt FrontendInstance.PublicIp
+
+  FrontendUrl:
+    Description: URL pública do frontend
+    Value: !Sub http://${FrontendInstance.PublicIp}

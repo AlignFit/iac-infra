@@ -7,45 +7,60 @@ Parameters:
     Type: String
 
 Resources:
-  #################################################
-  # LAMBDA UPLOAD
-  #################################################
+  ###########################################################
+  # LAMBDA — Upload (retorna presigned URL para o S3)
+  ###########################################################
 
   UploadVideoFunction:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: upload-video
-
       Runtime: python3.11
-
       Handler: upload_video.lambda_handler
-
       Role: !Sub arn:aws:iam::${AWS::AccountId}:role/LabRole
-
       Code:
         S3Bucket: !Ref SetupBucket
         S3Key: upload_video.zip
-
-      Timeout: 60
-
-      MemorySize: 512
-
+      Timeout: 30
+      MemorySize: 256
       Environment:
         Variables:
           RAW_BUCKET:
             Fn::ImportValue: RawBucketName
 
-  #################################################
+  ###########################################################
+  # LAMBDA — Consulta de resultado (polling)
+  ###########################################################
+
+  GetResultFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: get-result
+      Runtime: python3.11
+      Handler: get_result.lambda_handler
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/LabRole
+      Code:
+        S3Bucket: !Ref SetupBucket
+        S3Key: get_result.zip
+      Timeout: 10
+      MemorySize: 256
+      Environment:
+        Variables:
+          RESULTS_BUCKET:
+            Fn::ImportValue: ResultsBucketName
+
+  ###########################################################
   # API GATEWAY
-  #################################################
+  ###########################################################
 
   UploadApi:
     Type: AWS::ApiGateway::RestApi
     Properties:
       Name: align-fit-upload-api
 
-      BinaryMediaTypes:
-        - video/mp4
+  # -------------------------------------------------------
+  # /upload
+  # -------------------------------------------------------
 
   UploadResource:
     Type: AWS::ApiGateway::Resource
@@ -54,6 +69,7 @@ Resources:
       ParentId: !GetAtt UploadApi.RootResourceId
       PathPart: upload
 
+  # POST /upload
   UploadMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -61,15 +77,39 @@ Resources:
       ResourceId: !Ref UploadResource
       HttpMethod: POST
       AuthorizationType: NONE
-
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
+        Uri: !Sub
+          - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations
+          - Fn: !GetAtt UploadVideoFunction.Arn
 
-        Uri:
-          Fn::Sub:
-            - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaArn}/invocations
-            - LambdaArn: !GetAtt UploadVideoFunction.Arn
+  # OPTIONS /upload  (CORS pre-flight)
+  UploadOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UploadApi
+      ResourceId: !Ref UploadResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: "200"
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type'"
+            ResponseTemplates:
+              application/json: ""
+      MethodResponses:
+        - StatusCode: "200"
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
 
   UploadLambdaPermission:
     Type: AWS::Lambda::Permission
@@ -77,17 +117,87 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName: !Ref UploadVideoFunction
       Principal: apigateway.amazonaws.com
-
       SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UploadApi}/*/POST/upload
 
-  #################################################
+  # -------------------------------------------------------
+  # /result/{file_id}
+  # -------------------------------------------------------
+
+  ResultResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref UploadApi
+      ParentId: !GetAtt UploadApi.RootResourceId
+      PathPart: result
+
+  ResultFileIdResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref UploadApi
+      ParentId: !Ref ResultResource
+      PathPart: "{file_id}"
+
+  # GET /result/{file_id}
+  GetResultMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UploadApi
+      ResourceId: !Ref ResultFileIdResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Fn}/invocations
+          - Fn: !GetAtt GetResultFunction.Arn
+
+  # OPTIONS /result/{file_id}  (CORS pre-flight)
+  ResultOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref UploadApi
+      ResourceId: !Ref ResultFileIdResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: "200"
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type'"
+            ResponseTemplates:
+              application/json: ""
+      MethodResponses:
+        - StatusCode: "200"
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  GetResultLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GetResultFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${UploadApi}/*/GET/result/*
+
+  ###########################################################
   # DEPLOYMENT
-  #################################################
+  ###########################################################
 
   UploadApiDeployment:
     Type: AWS::ApiGateway::Deployment
     DependsOn:
       - UploadMethod
+      - UploadOptionsMethod
+      - GetResultMethod
+      - ResultOptionsMethod
     Properties:
       RestApiId: !Ref UploadApi
 
@@ -103,7 +213,9 @@ Outputs:
     Value: !Ref UploadApi
 
   UploadApiUrl:
-    Description: Endpoint para upload
-    Value: !Sub
-      - https://${ApiId}.execute-api.${AWS::Region}.amazonaws.com/prod/upload
-      - ApiId: !Ref UploadApi
+    Description: Endpoint para gerar presigned URL de upload
+    Value: !Sub https://${UploadApi}.execute-api.${AWS::Region}.amazonaws.com/prod/upload
+
+  ResultApiUrl:
+    Description: Endpoint para consultar resultado da análise
+    Value: !Sub https://${UploadApi}.execute-api.${AWS::Region}.amazonaws.com/prod/result/{file_id}

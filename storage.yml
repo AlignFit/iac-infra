@@ -3,6 +3,9 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: Storage Align Fit
 
 Resources:
+  # -------------------------------------------------------
+  # Vídeos brutos enviados pelos usuários
+  # -------------------------------------------------------
   RawBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -12,19 +15,39 @@ Resources:
         EventBridgeConfiguration:
           EventBridgeEnabled: true
 
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins:
+              - "*"
+            AllowedMethods:
+              - PUT
+            AllowedHeaders:
+              - "*"
+            MaxAge: 3000
+
       Tags:
         - Key: Name
           Value: RawVideoBucket
 
+  # -------------------------------------------------------
+  # CSVs de keypoints extraídos pelo YOLO
+  # -------------------------------------------------------
   TrustedBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub trusted-video-bucket-${AWS::AccountId}
 
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
+
       Tags:
         - Key: Name
           Value: TrustedVideoBucket
 
+  # -------------------------------------------------------
+  # CSVs tratados (reservado para pré-processamento futuro)
+  # -------------------------------------------------------
   ClientBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -33,6 +56,30 @@ Resources:
       Tags:
         - Key: Name
           Value: ClientVideoBucket
+
+  # -------------------------------------------------------
+  # Modelos de ML treinados (.pkl)
+  # -------------------------------------------------------
+  ModelsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub models-bucket-${AWS::AccountId}
+
+      Tags:
+        - Key: Name
+          Value: ModelsBucket
+
+  # -------------------------------------------------------
+  # Resultados de inferência em JSON (polling pelo frontend)
+  # -------------------------------------------------------
+  ResultsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub results-bucket-${AWS::AccountId}
+
+      Tags:
+        - Key: Name
+          Value: ResultsBucket
 
 Outputs:
   RawBucketName:
@@ -49,3 +96,13 @@ Outputs:
     Value: !Ref ClientBucket
     Export:
       Name: ClientBucketName
+
+  ModelsBucketName:
+    Value: !Ref ModelsBucket
+    Export:
+      Name: ModelsBucketName
+
+  ResultsBucketName:
+    Value: !Ref ResultsBucket
+    Export:
+      Name: ResultsBucketName
