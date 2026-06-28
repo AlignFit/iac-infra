@@ -11,6 +11,10 @@ Parameters:
     Type: String
     Description: Bucket onde estão os ZIPs das Lambdas de inferência e resultado
 
+  InferenceLayerArn:
+    Type: String
+    Description: ARN da Lambda Layer com dependências da inference (joblib, numpy, pandas, scikit-learn)
+
 Resources:
   ###########################################################
   # SQS — PIPELINE 1: Raw → keypoints (YOLO)
@@ -169,6 +173,8 @@ Resources:
       Code:
         S3Bucket: !Ref SetupBucket
         S3Key: inference.zip
+      Layers:
+        - !Ref InferenceLayerArn
       Timeout: 120
       MemorySize: 1024
       Environment:
