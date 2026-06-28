@@ -7,31 +7,36 @@ FROM public.ecr.aws/lambda/python:3.11
 # ── Atualizar pip
 RUN pip install --upgrade pip setuptools wheel
 
-# ── numpy pinado com wheel binário garantido
-RUN pip install --no-cache-dir --only-binary=:all: "numpy==1.26.4"
+# ── Instalar TODAS as dependências que o ultralytics precisa como wheels binários
+# A ordem importa: numpy e scipy antes do torch, torch antes do ultralytics
+RUN pip install --no-cache-dir --only-binary=:all: \
+    --target "${LAMBDA_TASK_ROOT}" \
+    "numpy==1.26.4" \
+    "scipy==1.11.4"
 
 # ── PyTorch CPU-only
-# --target instala em /var/task ao invés de /var/lang/bin (que é read-only)
 RUN pip install --no-cache-dir --only-binary=:all: \
     --target "${LAMBDA_TASK_ROOT}" \
     "torch==2.2.2" \
     "torchvision==0.17.2" \
     --extra-index-url https://download.pytorch.org/whl/cpu
 
-# ── ultralytics sem dependências que exigem compilador
-RUN pip install --no-cache-dir --no-deps \
-    --target "${LAMBDA_TASK_ROOT}" \
-    "ultralytics==8.3.0"
-
-# ── Dependências runtime do ultralytics para inferência
+# ── Dependências do ultralytics que precisam de wheel binário
 RUN pip install --no-cache-dir --only-binary=:all: \
     --target "${LAMBDA_TASK_ROOT}" \
+    "matplotlib==3.8.4" \
+    "seaborn==0.13.2" \
     "psutil>=5.9.8" \
     "py-cpuinfo>=9.0.0" \
     "tqdm>=4.64.0" \
     "requests>=2.23.0" \
     "pyyaml>=5.3.1" \
     "pillow>=7.1.2"
+
+# ── ultralytics sem dependências (todas já instaladas acima)
+RUN pip install --no-cache-dir --no-deps \
+    --target "${LAMBDA_TASK_ROOT}" \
+    "ultralytics==8.3.0"
 
 # ── opencv headless, pandas, boto3
 RUN pip install --no-cache-dir --only-binary=:all: \
