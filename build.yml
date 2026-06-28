@@ -1,0 +1,94 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >
+  EC2 Linux para build da imagem Docker e push para o ECR.
+  Usa LabRole (conta AWS Academy) - sem criacao de IAM roles.
+  Instancia temporaria - termine apos concluir o build.
+
+Parameters:
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+  InstanceType:
+    Type: String
+    Default: t3.large
+    AllowedValues:
+      - t3.medium
+      - t3.large
+      - t3.xlarge
+
+Resources:
+  ###########################################################
+  # SECURITY GROUP
+  ###########################################################
+
+  BuildSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: AlignFit Build Instance SSH
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: AlignFitBuildSG
+
+  ###########################################################
+  # EC2
+  ###########################################################
+
+  BuildInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref AmiId
+
+      # LabInstanceProfile ja existe na conta AWS Academy
+      # e tem permissoes de ECR, S3 e SSM
+      IamInstanceProfile: LabInstanceProfile
+
+      SecurityGroupIds:
+        - !Ref BuildSecurityGroup
+
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 30
+            VolumeType: gp3
+            DeleteOnTermination: true
+
+      Tags:
+        - Key: Name
+          Value: AlignFitBuildInstance
+
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          set -e
+
+          dnf update -y
+          dnf install -y docker git
+          systemctl enable docker
+          systemctl start docker
+          usermod -aG docker ec2-user
+
+          echo "BUILD_INSTANCE_READY" > /home/ec2-user/ready.txt
+          chown ec2-user:ec2-user /home/ec2-user/ready.txt
+
+Outputs:
+  InstanceId:
+    Value: !Ref BuildInstance
+
+  PublicIp:
+    Value: !GetAtt BuildInstance.PublicIp
+
+  SSMConnect:
+    Description: Comando para conectar sem chave SSH
+    Value: !Sub "aws ssm start-session --target ${BuildInstance}"
+
+  Terminate:
+    Description: Rodar quando terminar o build
+    Value: !Sub "aws ec2 terminate-instances --instance-ids ${BuildInstance}"

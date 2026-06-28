@@ -1,40 +1,50 @@
 # =========================================================
 # Imagem Docker para a Lambda video-processor
-#
-# Contém:
-#   - Python 3.11 (base Lambda)
-#   - ultralytics (YOLOv8 Pose)
-#   - opencv-python-headless
-#   - pandas
-#   - boto3
-#   - Modelo yolov8n-pose.pt
-#   - Handler: user_dataset_generator.lambda_handler
 # =========================================================
 
 FROM public.ecr.aws/lambda/python:3.11
 
-# ferramentas básicas
+# ── Atualizar pip
 RUN pip install --upgrade pip setuptools wheel
 
+# ── numpy pinado com wheel binário garantido
+RUN pip install --no-cache-dir --only-binary=:all: "numpy==1.26.4"
+
+# ── PyTorch CPU-only
+# --target instala em /var/task ao invés de /var/lang/bin (que é read-only)
 RUN pip install --no-cache-dir --only-binary=:all: \
-    numpy==1.26.4 \
-    scipy==1.11.4
+    --target "${LAMBDA_TASK_ROOT}" \
+    "torch==2.2.2" \
+    "torchvision==0.17.2" \
+    --extra-index-url https://download.pytorch.org/whl/cpu
 
+# ── ultralytics sem dependências que exigem compilador
 RUN pip install --no-cache-dir --no-deps \
-    ultralytics==8.3.0
+    --target "${LAMBDA_TASK_ROOT}" \
+    "ultralytics==8.3.0"
 
-# ── Instalar bibliotecas Python ───────────────────────────────────────────────
-RUN pip install --no-cache-dir \
-    opencv-python-headless==4.10.0.84 \
-    pandas==2.2.3 \
-    boto3==1.35.0
+# ── Dependências runtime do ultralytics para inferência
+RUN pip install --no-cache-dir --only-binary=:all: \
+    --target "${LAMBDA_TASK_ROOT}" \
+    "psutil>=5.9.8" \
+    "py-cpuinfo>=9.0.0" \
+    "tqdm>=4.64.0" \
+    "requests>=2.23.0" \
+    "pyyaml>=5.3.1" \
+    "pillow>=7.1.2"
 
-# ── Copiar o handler da Lambda ────────────────────────────────────────────────
+# ── opencv headless, pandas, boto3
+RUN pip install --no-cache-dir --only-binary=:all: \
+    --target "${LAMBDA_TASK_ROOT}" \
+    "opencv-python-headless==4.10.0.84" \
+    "pandas==2.2.3" \
+    "boto3==1.35.0"
+
+# ── Copiar o handler da Lambda
 COPY iac-infra/lambda/user_dataset_generator.py ${LAMBDA_TASK_ROOT}/user_dataset_generator.py
 
-# ── Copiar o modelo YOLO Pose ─────────────────────────────────────────────────
-# O arquivo yolov8n-pose.pt deve estar em exercises-dataset/utils/
+# ── Copiar o modelo YOLO Pose
 COPY exercises-dataset/utils/yolov8n-pose.pt ${LAMBDA_TASK_ROOT}/yolov8n-pose.pt
 
-# ── Definir o handler ─────────────────────────────────────────────────────────
+# ── Definir o handler
 CMD ["user_dataset_generator.lambda_handler"]

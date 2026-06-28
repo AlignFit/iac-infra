@@ -45,6 +45,86 @@ aws s3 cp ./lambda/zip s3://setup-bucket-{ID_DA_CONTA}/ --recursive
 
 ## 3. Build e push da imagem Docker para o ECR (Lambda processadora)
 
+### Opção A — Build remoto na EC2 (recomendado se o Docker local não funcionar)
+
+#### 3.1 Subir a instância de build
+
+```powershell
+aws cloudformation deploy `
+  --template-file "build.yml" `
+  --stack-name "BuildAlignFitStack" `
+  --capabilities "CAPABILITY_NAMED_IAM"
+```
+
+Aguardar a instância ficar pronta e pegar o IP:
+
+```powershell
+aws cloudformation describe-stacks `
+  --stack-name "BuildAlignFitStack" `
+  --query "Stacks[0].Outputs" `
+  --output table
+```
+
+#### 3.2 Conectar na instância via SSM (sem chave SSH)
+
+```powershell
+# Substitua INSTANCE_ID pelo BuildInstanceId do output acima
+aws ssm start-session --target {INSTANCE_ID}
+```
+
+> O SSM Session Manager abre um terminal direto no browser ou via CLI,
+> sem precisar de par de chaves SSH ou porta 22 aberta.
+> Se não tiver o plugin SSM instalado localmente:
+> https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html
+
+#### 3.3 Dentro da instância — clonar o repositório
+
+```bash
+# Aguardar o UserData terminar (deve aparecer "BUILD_INSTANCE_READY")
+cat ~/ready.txt
+
+# Clonar o repositório do projeto
+cd ~
+git clone https://github.com/{SEU_USUARIO}/{SEU_REPO}.git AlingFit
+cd AlingFit
+```
+
+#### 3.4 Dentro da instância — autenticar no ECR e fazer o build
+
+```bash
+# Definir variáveis (substitua pelo ID real da sua conta)
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+REGION=us-east-1
+REPO=align-fit-processor
+
+# Criar repositório no ECR (apenas na primeira vez)
+aws ecr create-repository --repository-name $REPO --region $REGION 2>/dev/null || true
+
+# Autenticar Docker no ECR
+aws ecr get-login-password --region $REGION \
+  | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com
+
+# Build da imagem (rodar na raiz do workspace — pasta AlingFit)
+docker build -f iac-infra/Dockerfile -t $REPO .
+
+# Tag e push
+docker tag $REPO:latest $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$REPO:latest
+docker push $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$REPO:latest
+
+echo "✅ Push concluído: $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$REPO:latest"
+```
+
+#### 3.5 Terminar a instância após o build (evitar custos)
+
+```powershell
+# Rodar localmente após sair da sessão SSM
+aws cloudformation delete-stack --stack-name "BuildAlignFitStack"
+```
+
+---
+
+### Opção B — Build local (se o Docker Desktop estiver funcionando)
+
 ```powershell
 # Criar repositório no ECR (apenas na primeira vez)
 aws ecr create-repository --repository-name align-fit-processor
@@ -53,13 +133,16 @@ aws ecr create-repository --repository-name align-fit-processor
 aws ecr get-login-password --region us-east-1 `
   | docker login --username AWS --password-stdin {ID_DA_CONTA}.dkr.ecr.us-east-1.amazonaws.com
 
-# Build da imagem (rodar na raiz do workspace, não em iac-infra)
+# Build da imagem — rodar na RAIZ do workspace (pasta AlingFit)
 docker build -f iac-infra/Dockerfile -t align-fit-processor .
 
 # Tag e push
 docker tag align-fit-processor:latest {ID_DA_CONTA}.dkr.ecr.us-east-1.amazonaws.com/align-fit-processor:latest
 docker push {ID_DA_CONTA}.dkr.ecr.us-east-1.amazonaws.com/align-fit-processor:latest
 ```
+
+> **Atenção:** o build instala PyTorch CPU + ultralytics, o que pode levar 10–20 minutos
+> e gerar uma imagem de ~4GB. Isso é esperado. O push para o ECR também levará alguns minutos.
 
 ---
 
@@ -124,8 +207,8 @@ aws cloudformation deploy `
   --template-file "frontend.yml" `
   --stack-name "FrontendAlignFitStack" `
   --parameter-overrides `
-    "UploadApiUrl=https://{API_ID}.execute-api.us-east-1.amazonaws.com/prod/upload" `
-    "ResultApiUrl=https://{API_ID}.execute-api.us-east-1.amazonaws.com/prod/result" `
+    "UploadApiUrl=https://g6r8f8o5ta.execute-api.us-east-1.amazonaws.com/prod/upload" `
+    "ResultApiUrl=https://g6r8f8o5ta.execute-api.us-east-1.amazonaws.com/prod/result/{file_id}" `
   --capabilities "CAPABILITY_NAMED_IAM"
 ```
 
