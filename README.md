@@ -208,7 +208,7 @@ aws cloudformation deploy `
   --stack-name "FrontendAlignFitStack" `
   --parameter-overrides `
     "UploadApiUrl=https://g6r8f8o5ta.execute-api.us-east-1.amazonaws.com/prod/upload" `
-    "ResultApiUrl=https://g6r8f8o5ta.execute-api.us-east-1.amazonaws.com/prod/result/{file_id}" `
+    "ResultApiUrl=https://g6r8f8o5ta.execute-api.us-east-1.amazonaws.com/prod/result" `
   --capabilities "CAPABILITY_NAMED_IAM"
 ```
 
