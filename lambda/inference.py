@@ -9,7 +9,7 @@ Fluxo:
   5. Identifica o exercício
   6. Carrega o modelo de execução específico do exercício
   7. Classifica a execução como correta ou errada
-  8. Salva o resultado em JSON no bucket Results
+  8. Salva o resultado em JSON no bucket Results (individual + incremental)
 """
 
 # =========================================================
@@ -19,6 +19,7 @@ Fluxo:
 import os
 import json
 import tempfile
+from datetime import datetime, timezone
 
 import boto3
 import joblib
@@ -51,10 +52,16 @@ EXERCISE_MODEL_KEYS = {
 # =========================================================
 
 def download_model(key: str):
-    """Faz download de um modelo do bucket Models e retorna o objeto carregado."""
-    with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as tmp:
-        s3.download_file(MODELS_BUCKET, key, tmp.name)
-        return joblib.load(tmp.name)
+    """Faz download de um modelo do bucket Models com cache em /tmp."""
+    cache_path = f"/tmp/{key}"
+
+    if os.path.exists(cache_path):
+        print(f"INFO | Modelo em cache | /tmp/{key}")
+        return joblib.load(cache_path)
+
+    s3.download_file(MODELS_BUCKET, key, cache_path)
+    print(f"INFO | Modelo baixado | s3://{MODELS_BUCKET}/{key}")
+    return joblib.load(cache_path)
 
 
 def extract_features(df: pd.DataFrame) -> np.ndarray:
@@ -81,7 +88,9 @@ def extract_features(df: pd.DataFrame) -> np.ndarray:
 
 
 def save_result(file_id: str, result: dict):
-    """Salva o resultado em JSON no bucket Results."""
+    """Salva o resultado individual + append no histórico incremental."""
+
+    # ─── Resultado individual (usado pelo polling do frontend) ───
     result_key = f"results/{file_id}.json"
 
     s3.put_object(
@@ -92,6 +101,26 @@ def save_result(file_id: str, result: dict):
     )
 
     print(f"INFO | Resultado salvo | s3://{RESULTS_BUCKET}/{result_key}")
+
+    # ─── Histórico incremental (usado pelo Grafana) ─────────────
+    HISTORY_KEY = "results/historico.json"
+
+    try:
+        obj = s3.get_object(Bucket=RESULTS_BUCKET, Key=HISTORY_KEY)
+        history = json.loads(obj["Body"].read().decode("utf-8"))
+    except Exception:
+        history = []
+
+    history.append(result)
+
+    s3.put_object(
+        Bucket=RESULTS_BUCKET,
+        Key=HISTORY_KEY,
+        Body=json.dumps(history, ensure_ascii=False, indent=2),
+        ContentType="application/json",
+    )
+
+    print(f"INFO | Histórico atualizado | {len(history)} registros")
 
 # =========================================================
 # HANDLER
@@ -190,6 +219,8 @@ def lambda_handler(event, context):
 
         friendly_name = exercise_friendly.get(exercise_name, exercise_name)
 
+        now = datetime.now(timezone.utc)
+
         result = {
             "file_id":   file_id,
             "status":    "success",
@@ -199,6 +230,9 @@ def lambda_handler(event, context):
                 f"Exercício identificado: {friendly_name}. "
                 f"Execução {'correta!' if execution == 'correta' else 'com erros. Revise a técnica do exercício.'}"
             ),
+            "timestamp": now.isoformat(),
+            "data":      now.strftime("%Y-%m-%d"),
+            "hora":      now.strftime("%H:%M:%S"),
         }
 
         save_result(file_id, result)

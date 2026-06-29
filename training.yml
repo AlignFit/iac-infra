@@ -40,7 +40,7 @@ Resources:
   TrainingSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: AlignFit Training Instance - SSH + Jupyter
+      GroupDescription: AlignFit Training Instance - SSH + Jupyter + Grafana
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 22
@@ -49,6 +49,10 @@ Resources:
         - IpProtocol: tcp
           FromPort: 8888
           ToPort: 8888
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
@@ -162,6 +166,20 @@ Resources:
           systemctl enable jupyter
           systemctl start jupyter
 
+          # ── Instalar Grafana OSS ──────────────────────────────────────
+          dnf install -y https://dl.grafana.com/oss/release/grafana-11.0.0-1.x86_64.rpm || true
+
+          # ── Instalar plugin Infinity (leitura de JSON/CSV via URL/S3) ─
+          grafana-cli plugins install yesoreyeram-infinity-datasource || true
+
+          # ── Configurar Grafana para permitir acesso anônimo (leitura) ─
+          sed -i 's/;allow_embedding = false/allow_embedding = true/' /etc/grafana/grafana.ini
+
+          # ── Habilitar e iniciar Grafana ───────────────────────────────
+          systemctl daemon-reload
+          systemctl enable grafana-server
+          systemctl start grafana-server
+
           # ── Sinalizar que está pronto ─────────────────────────────────
           echo "TRAINING_INSTANCE_READY" > /home/ec2-user/ready.txt
           chown ec2-user:ec2-user /home/ec2-user/ready.txt
@@ -177,13 +195,17 @@ Outputs:
     Description: URL do Jupyter Notebook (aguardar 3-5 min após o deploy)
     Value: !Sub http://${TrainingInstance.PublicIp}:8888
 
+  GrafanaUrl:
+    Description: URL do Grafana (admin/admin na primeira vez)
+    Value: !Sub http://${TrainingInstance.PublicIp}:3000
+
   SSMConnect:
     Description: Conectar via SSM (sem chave SSH)
     Value: !Sub "aws ssm start-session --target ${TrainingInstance}"
 
   UploadModelsCommand:
     Description: Comando para subir modelos treinados para o bucket Models
-    Value: !Sub "aws s3 cp /home/ec2-user/AlingFit/exercises-dataset/models/ s3://models-bucket-${AWS::AccountId}/ --recursive"
+    Value: !Sub "aws s3 cp /home/ec2-user/AlingFit/exercises-dataset/models/ s3://model-s3-${AWS::AccountId}/ --recursive"
 
   Terminate:
     Description: Deletar após terminar o treinamento (evitar custos)

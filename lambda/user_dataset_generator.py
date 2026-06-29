@@ -230,6 +230,38 @@ def process_video(video_path):
     s3.upload_file(output_csv, TRUSTED_BUCKET, trusted_key)
 
     # =====================================================
+    # ATUALIZAR CSV MESTRE INCREMENTAL
+    # =====================================================
+
+    # Salvo em "incremental/" para NÃO disparar a regra EventBridge
+    # que monitora "datasets/" (essa regra aciona a Lambda de inferência)
+    MASTER_CSV_KEY = "incremental/master-dataset.csv"
+
+    try:
+        master_tmp = f"/tmp/master-dataset.csv"
+        s3.download_file(TRUSTED_BUCKET, MASTER_CSV_KEY, master_tmp)
+        master_df = pd.read_csv(master_tmp)
+        master_df = pd.concat([master_df, df], ignore_index=True)
+        print(f"INFO | CSV mestre atualizado | +{len(df)} linhas → total {len(master_df)}")
+    except Exception:
+        # Primeira execução — CSV mestre não existe ainda, usar df atual
+        master_df = df
+        print(f"INFO | CSV mestre criado | {len(master_df)} linhas")
+
+    master_csv_path = f"/tmp/master-dataset-out.csv"
+    master_df.to_csv(master_csv_path, index=False)
+    s3.upload_file(master_csv_path, TRUSTED_BUCKET, MASTER_CSV_KEY)
+
+    try:
+        os.remove(master_tmp)
+    except (OSError, UnboundLocalError):
+        pass
+    try:
+        os.remove(master_csv_path)
+    except OSError:
+        pass
+
+    # =====================================================
     # CLEANUP TEMPORÁRIO
     # =====================================================
 

@@ -17,7 +17,7 @@ Gerenciado via AWS CloudFormation. Siga a ordem abaixo para um deploy completo.
 
 ```
 1. setup.yml       → cria o bucket de artefatos (ZIPs, layers)
-2. storage.yml     → cria todos os buckets S3 (Raw, Trusted, Client, Models, Results)
+2. storage.yml     → cria todos os buckets S3 (Raw, Client, Model, Result)
 3. build.yml       → EC2 temporária para build Docker + Lambda Layer (opcional)
 4. processing.yml  → SQS, EventBridge, Lambda processadora (YOLO) e Lambda de inferência
 5. api.yml         → API Gateway + Lambda upload + Lambda get-result
@@ -42,7 +42,7 @@ aws cloudformation deploy `
 
 ## 2. Stack Storage
 
-Cria os 5 buckets S3 com EventBridge habilitado e CORS no Raw.
+Cria os 4 buckets S3 com EventBridge habilitado e CORS no Raw.
 
 ```powershell
 aws cloudformation deploy `
@@ -54,8 +54,22 @@ aws cloudformation deploy `
 ### Upload dos modelos treinados para o bucket Models
 
 ```powershell
-aws s3 cp ../exercises-dataset/models/ s3://models-bucket-{ID_DA_CONTA}/ --recursive
+aws s3 cp ../exercises-dataset/models/ s3://model-s3-{ID_DA_CONTA}/ --recursive
 ```
+
+### Upload do CSV mestre inicial (base para dataset incremental)
+
+O CSV mestre (`master-dataset.csv`) cresce automaticamente a cada vídeo processado.
+Para inicializá-lo com os dados de treino já existentes:
+
+```powershell
+aws s3 cp ../exercises-dataset/datasets/raw-dataset.csv s3://client-s3-{ID_DA_CONTA}/incremental/master-dataset.csv
+```
+
+> **Nota:** Após o upload inicial, cada execução da Lambda processadora (YOLO)
+> adiciona automaticamente as novas linhas ao `incremental/master-dataset.csv` no bucket Client.
+> O CSV é salvo no prefixo `incremental/` (não `datasets/`) para evitar disparar a
+> regra EventBridge de inferência. Baixe no Jupyter para re-treinamento dos modelos.
 
 ---
 
@@ -262,11 +276,12 @@ aws cloudformation deploy `
   --parameter-overrides `
     "UploadApiUrl=https://xxxxxx.execute-api.us-east-1.amazonaws.com/prod/upload" `
     "ResultApiUrl=https://xxxxxx.execute-api.us-east-1.amazonaws.com/prod/result" `
+    "GitRepoUrl=https://github.com/AlignFit/align-fit-web.git" `
   --capabilities "CAPABILITY_NAMED_IAM"
 ```
 
-> **⚠️ IMPORTANTE:** Antes de rodar este deploy, atualize a URL do `git clone` dentro do
-> `frontend.yml` (UserData) para apontar para o repositório real do projeto.
+> **Nota:** O parâmetro `GitRepoUrl` define a URL do repositório do frontend.
+> Se não informado, usa o default `https://github.com/AlignFit/align-fit-web.git`.
 
 Obter a URL pública do frontend:
 
@@ -330,9 +345,12 @@ aws cloudformation deploy `
 
 ---
 
-## 8. EC2 de Treinamento (Jupyter Notebook)
+## 8. EC2 de Treinamento (Jupyter Notebook + Grafana)
 
-Instância EC2 com Jupyter Notebook pré-configurado para treinar novos modelos de ML e fazer upload direto para o bucket Models.
+Instância EC2 com Jupyter Notebook e Grafana pré-configurados.
+
+- **Jupyter Notebook** — treinar novos modelos de ML e fazer upload direto para o bucket Models
+- **Grafana** — leitura do JSON incremental de resultados para dashboards e métricas
 
 ### Deploy
 
@@ -365,6 +383,26 @@ O Jupyter abre direto na pasta `exercises-dataset/` com acesso a:
 - Modelos existentes (`models/`)
 - Vídeos para processamento (`videos/`)
 
+### Acessar o Grafana
+
+Acesse `http://<IP_PUBLICO>:3000` com as credenciais padrão (`admin` / `admin`).
+
+O plugin **Infinity** já vem instalado. Para configurar o datasource:
+
+1. Vá em **Connections → Data sources → Add data source → Infinity**
+2. Configure uma query do tipo **JSON** apontando para:
+   - URL: A presigned URL do S3, ou use o AWS SDK via backend
+   - Alternativa simples: copie o `historico.json` para a EC2 periodicamente:
+     ```bash
+     aws s3 cp s3://result-s3-{ID_DA_CONTA}/results/historico.json /tmp/historico.json
+     ```
+   - E aponte o Infinity para `file:///tmp/historico.json`
+3. Crie dashboards com as métricas:
+   - Total de análises realizadas
+   - Exercícios mais enviados
+   - Taxa de execuções corretas vs erradas
+   - Evolução ao longo do tempo (campo `timestamp`)
+
 ### Ambiente pré-instalado
 
 | Biblioteca | Versão |
@@ -380,13 +418,14 @@ O Jupyter abre direto na pasta `exercises-dataset/` com acesso a:
 | matplotlib | latest |
 | seaborn | latest |
 | boto3 | latest |
+| Grafana | 11.0.0 |
 
 ### Upload dos modelos treinados para o S3
 
 No terminal do Jupyter ou via SSH na instância:
 
 ```bash
-aws s3 cp models/ s3://models-bucket-{ID_DA_CONTA}/ --recursive
+aws s3 cp models/ s3://model-s3-{ID_DA_CONTA}/ --recursive
 ```
 
 ### Terminar a instância (evitar custos)
@@ -396,6 +435,57 @@ aws cloudformation delete-stack --stack-name "TrainingAlignFitStack"
 ```
 
 > **⚠️ IMPORTANTE:** A instância não é gratuita. Delete a stack assim que terminar o treinamento.
+
+---
+
+## Dados Incrementais
+
+O sistema mantém dois arquivos incrementais que crescem a cada execução:
+
+### JSON Incremental — `results/historico.json`
+
+**Bucket:** `result-s3-{ID_DA_CONTA}`
+**Atualizado por:** Lambda `inference`
+
+Cada vez que um vídeo é analisado, o resultado (exercício, execução, timestamp) é adicionado
+a esse arquivo. Estrutura:
+
+```json
+[
+  {
+    "file_id": "uuid",
+    "status": "success",
+    "exercicio": "desenvolvimento",
+    "execucao": "correta",
+    "mensagem": "...",
+    "timestamp": "2026-06-28T15:30:00+00:00",
+    "data": "2026-06-28",
+    "hora": "15:30:00"
+  },
+  ...
+]
+```
+
+Usado pelo **Grafana** para dashboards e métricas do sistema.
+
+### CSV Incremental — `incremental/master-dataset.csv`
+
+**Bucket:** `client-s3-{ID_DA_CONTA}`
+**Atualizado por:** Lambda `video-processor` (YOLO)
+
+Contém todos os keypoints extraídos de todos os vídeos já processados. A cada novo vídeo,
+as linhas são adicionadas ao final desse CSV. O formato é idêntico ao `raw-dataset.csv` do
+repositório `exercises-dataset`.
+
+> O CSV é salvo no prefixo `incremental/` para evitar disparar a regra EventBridge
+> que monitora o prefixo `datasets/` (usada para acionar a Lambda de inferência).
+
+Usado no **Jupyter Notebook** para re-treinamento de modelos com dados sempre atualizados:
+
+```bash
+# Dentro do Jupyter — baixar o master-dataset atualizado
+aws s3 cp s3://client-s3-{ID_DA_CONTA}/incremental/master-dataset.csv datasets/user-raw-dataset.csv
+```
 
 ---
 
@@ -449,13 +539,13 @@ Após corrigir o `.env`, rebuild e redeploy do frontend (ver seção "Redeploy d
 O bucket Raw já tem CORS configurado no `storage.yml`. Se mesmo assim falhar:
 
 ```bash
-aws s3api get-bucket-cors --bucket raw-video-bucket-{ID_DA_CONTA}
+aws s3api get-bucket-cors --bucket raw-s3-{ID_DA_CONTA}
 ```
 
 Se vazio, aplique manualmente:
 
 ```bash
-aws s3api put-bucket-cors --bucket raw-video-bucket-{ID_DA_CONTA} --cors-configuration '{
+aws s3api put-bucket-cors --bucket raw-s3-{ID_DA_CONTA} --cors-configuration '{
   "CORSRules": [{
     "AllowedHeaders": ["*"],
     "AllowedMethods": ["PUT"],
@@ -513,8 +603,8 @@ aws logs tail /aws/lambda/{NOME_DA_FUNCAO} --follow
 
 ```bash
 # Verificar se há resultado salvo para um file_id
-aws s3 ls s3://results-bucket-{ID_DA_CONTA}/results/
+aws s3 ls s3://result-s3-{ID_DA_CONTA}/results/
 
 # Ler um resultado específico
-aws s3 cp s3://results-bucket-{ID_DA_CONTA}/results/{FILE_ID}.json -
+aws s3 cp s3://result-s3-{ID_DA_CONTA}/results/{FILE_ID}.json -
 ```

@@ -27,6 +27,11 @@ Parameters:
       Incremente este valor para forçar a recriação da EC2 e re-executar o
       UserData (útil para atualizar o código do frontend via redeploy do CFN).
 
+  GitRepoUrl:
+    Type: String
+    Default: https://github.com/AlignFit/align-fit-web.git
+    Description: URL HTTPS do repositório do frontend React
+
   # AMI Amazon Linux 2023 (us-east-1) — atualize se mudar de região
   AmiId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
@@ -87,7 +92,7 @@ Resources:
 
           # ── Clonar repositório do frontend ────────────────────────────
           cd /opt
-          git clone https://github.com/AlignFit/align-fit-web.git align-fit-web
+          git clone ${GitRepoUrl} align-fit-web
           cd align-fit-web
 
           # ── Criar arquivo .env com as URLs da API ─────────────────────

@@ -9,7 +9,7 @@ Resources:
   RawBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub raw-video-bucket-${AWS::AccountId}
+      BucketName: !Sub raw-s3-${AWS::AccountId}
 
       NotificationConfiguration:
         EventBridgeConfiguration:
@@ -27,15 +27,15 @@ Resources:
 
       Tags:
         - Key: Name
-          Value: RawVideoBucket
+          Value: RawBucket
 
   # -------------------------------------------------------
-  # CSVs de keypoints extraídos pelo YOLO
+  # CSVs de keypoints extraídos pelo YOLO + CSV mestre incremental
   # -------------------------------------------------------
-  TrustedBucket:
+  ClientBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub trusted-video-bucket-${AWS::AccountId}
+      BucketName: !Sub client-s3-${AWS::AccountId}
 
       NotificationConfiguration:
         EventBridgeConfiguration:
@@ -43,19 +43,7 @@ Resources:
 
       Tags:
         - Key: Name
-          Value: TrustedVideoBucket
-
-  # -------------------------------------------------------
-  # CSVs tratados (reservado para pré-processamento futuro)
-  # -------------------------------------------------------
-  ClientBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: !Sub client-video-bucket-${AWS::AccountId}
-
-      Tags:
-        - Key: Name
-          Value: ClientVideoBucket
+          Value: ClientBucket
 
   # -------------------------------------------------------
   # Modelos de ML treinados (.pkl)
@@ -63,7 +51,7 @@ Resources:
   ModelsBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub models-bucket-${AWS::AccountId}
+      BucketName: !Sub model-s3-${AWS::AccountId}
 
       Tags:
         - Key: Name
@@ -75,7 +63,7 @@ Resources:
   ResultsBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub results-bucket-${AWS::AccountId}
+      BucketName: !Sub result-s3-${AWS::AccountId}
 
       Tags:
         - Key: Name
@@ -86,11 +74,6 @@ Outputs:
     Value: !Ref RawBucket
     Export:
       Name: RawBucketName
-
-  TrustedBucketName:
-    Value: !Ref TrustedBucket
-    Export:
-      Name: TrustedBucketName
 
   ClientBucketName:
     Value: !Ref ClientBucket
