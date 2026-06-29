@@ -150,6 +150,8 @@ Resources:
             Fn::ImportValue: RawBucketName
           TRUSTED_BUCKET:
             Fn::ImportValue: ClientBucketName
+          RESULTS_BUCKET:
+            Fn::ImportValue: ResultsBucketName
 
   VideoProcessorEventSourceMapping:
     Type: AWS::Lambda::EventSourceMapping

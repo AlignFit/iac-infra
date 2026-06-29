@@ -65,9 +65,40 @@ Resources:
     Properties:
       BucketName: !Sub result-s3-${AWS::AccountId}
 
+      # Permitir acesso público (necessário para Grafana Infinity)
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins:
+              - "*"
+            AllowedMethods:
+              - GET
+            AllowedHeaders:
+              - "*"
+            MaxAge: 3000
+
       Tags:
         - Key: Name
           Value: ResultsBucket
+
+  # Política de leitura pública apenas para results/historico.json
+  ResultsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ResultsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: PublicReadHistorico
+            Effect: Allow
+            Principal: "*"
+            Action: s3:GetObject
+            Resource: !Sub arn:aws:s3:::result-s3-${AWS::AccountId}/results/historico.json
 
 Outputs:
   RawBucketName:

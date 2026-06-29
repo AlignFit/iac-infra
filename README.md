@@ -63,13 +63,12 @@ O CSV mestre (`master-dataset.csv`) cresce automaticamente a cada vídeo process
 Para inicializá-lo com os dados de treino já existentes:
 
 ```powershell
-aws s3 cp ../exercises-dataset/datasets/raw-dataset.csv s3://client-s3-{ID_DA_CONTA}/incremental/master-dataset.csv
+aws s3 cp ../exercises-dataset/datasets/raw-dataset.csv s3://result-s3-{ID_DA_CONTA}/master-dataset.csv
 ```
 
 > **Nota:** Após o upload inicial, cada execução da Lambda processadora (YOLO)
-> adiciona automaticamente as novas linhas ao `incremental/master-dataset.csv` no bucket Client.
-> O CSV é salvo no prefixo `incremental/` (não `datasets/`) para evitar disparar a
-> regra EventBridge de inferência. Baixe no Jupyter para re-treinamento dos modelos.
+> adiciona automaticamente as novas linhas ao `master-dataset.csv` no bucket Result.
+> Baixe no Jupyter para re-treinamento dos modelos.
 
 ---
 
@@ -179,7 +178,7 @@ aws ecr create-repository --repository-name $REPO --region $REGION 2>/dev/null |
 
 # Autenticar Docker no ECR
 aws ecr get-login-password --region $REGION \
-  | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com
+  | sudo docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com
 
 # Build da imagem (rodar na raiz do workspace)
 docker build -f iac-infra/Dockerfile -t $REPO .
@@ -468,23 +467,20 @@ a esse arquivo. Estrutura:
 
 Usado pelo **Grafana** para dashboards e métricas do sistema.
 
-### CSV Incremental — `incremental/master-dataset.csv`
+### CSV Incremental — `master-dataset.csv`
 
-**Bucket:** `client-s3-{ID_DA_CONTA}`
+**Bucket:** `result-s3-{ID_DA_CONTA}`
 **Atualizado por:** Lambda `video-processor` (YOLO)
 
 Contém todos os keypoints extraídos de todos os vídeos já processados. A cada novo vídeo,
 as linhas são adicionadas ao final desse CSV. O formato é idêntico ao `raw-dataset.csv` do
 repositório `exercises-dataset`.
 
-> O CSV é salvo no prefixo `incremental/` para evitar disparar a regra EventBridge
-> que monitora o prefixo `datasets/` (usada para acionar a Lambda de inferência).
-
 Usado no **Jupyter Notebook** para re-treinamento de modelos com dados sempre atualizados:
 
 ```bash
 # Dentro do Jupyter — baixar o master-dataset atualizado
-aws s3 cp s3://client-s3-{ID_DA_CONTA}/incremental/master-dataset.csv datasets/user-raw-dataset.csv
+aws s3 cp s3://result-s3-{ID_DA_CONTA}/master-dataset.csv datasets/user-raw-dataset.csv
 ```
 
 ---

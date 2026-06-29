@@ -91,20 +91,70 @@ Resources:
           export TMPDIR=/var/tmp/pip-build
           mkdir -p $TMPDIR
 
-          # ── Atualizar sistema ─────────────────────────────────────────
-          dnf update -y
-          dnf install -y python3.11 python3.11-pip git
+          # ── Instalar Grafana ANTES de mexer no Python ─────────────────
+          # (o dnf usa Python 3.9 do sistema — pip pode quebrar módulos)
+          dnf install -y git fontconfig freetype
 
-          # ── Usar python3.11 como padrão ───────────────────────────────
-          alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
-          alternatives --set python3 /usr/bin/python3.11
+          # Instalar Grafana via RPM diretamente
+          curl -sL https://dl.grafana.com/oss/release/grafana-12.0.0-1.x86_64.rpm -o /tmp/grafana.rpm
+          rpm -ivh /tmp/grafana.rpm
+          rm -f /tmp/grafana.rpm
 
-          # ── Instalar PyTorch CPU-only primeiro (evita download CUDA) ──
+          # Plugin Infinity (versão compatível com Grafana 11.4)
+          /usr/sbin/grafana-cli plugins install yesoreyeram-infinity-datasource || true
+
+          # Configurar Grafana
+          sed -i 's/;allow_embedding = false/allow_embedding = true/' /etc/grafana/grafana.ini
+
+          # ── Provisionar datasource Infinity via YAML ──────────────────
+          mkdir -p /etc/grafana/provisioning/datasources
+          mkdir -p /etc/grafana/provisioning/dashboards
+          mkdir -p /var/lib/grafana/dashboards
+
+          cat > /etc/grafana/provisioning/datasources/infinity.yaml <<DSEOF
+          apiVersion: 1
+          datasources:
+            - name: AlignFit Historico
+              type: yesoreyeram-infinity-datasource
+              uid: alignfit-historico
+              access: proxy
+              isDefault: true
+              jsonData:
+                url: https://result-s3-${AWS::AccountId}.s3.us-east-1.amazonaws.com
+          DSEOF
+
+          cat > /etc/grafana/provisioning/dashboards/alignfit.yaml <<DBEOF
+          apiVersion: 1
+          providers:
+            - name: AlignFit
+              orgId: 1
+              folder: ''
+              type: file
+              disableDeletion: false
+              editable: true
+              options:
+                path: /var/lib/grafana/dashboards
+                foldersFromFilesStructure: false
+          DBEOF
+
+          # Baixar a dashboard do repositório (já estará na EC2 via git clone)
+          # Por ora, criar inline a partir do template
+          curl -sL https://result-s3-${AWS::AccountId}.s3.us-east-1.amazonaws.com/results/historico.json -o /dev/null || true
+
+          # Habilitar e iniciar Grafana
+          systemctl daemon-reload
+          systemctl enable grafana-server
+          systemctl start grafana-server
+
+          # ── Instalar Python 3.11 isolado (sem quebrar o sistema) ──────
+          dnf install -y python3.11 python3.11-pip
+
+          # ── Instalar PyTorch CPU-only ─────────────────────────────────
           pip3.11 install --no-cache-dir \
             torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
           # ── Instalar bibliotecas de ML ────────────────────────────────
-          pip3.11 install --no-cache-dir --ignore-installed \
+          pip3.11 install --no-cache-dir \
             jupyter \
             notebook \
             numpy==1.26.4 \
@@ -123,28 +173,35 @@ Resources:
 
           # ── Clonar repositório ────────────────────────────────────────
           cd /home/ec2-user
-          git clone ${GitRepoUrl} AlingFit || true
-          chown -R ec2-user:ec2-user AlingFit
+          git clone ${GitRepoUrl} exercises-dataset || true
+          chown -R ec2-user:ec2-user exercises-dataset
+
+          # Criar diretório de trabalho garantido
+          mkdir -p /home/ec2-user/exercises-dataset
+          chown ec2-user:ec2-user /home/ec2-user/exercises-dataset
+
+          # ── Localizar binário do Jupyter ──────────────────────────────
+          JUPYTER_BIN=$(which jupyter 2>/dev/null || find /usr/local/bin /usr/bin -name "jupyter" 2>/dev/null | head -1)
+          echo "INFO | Jupyter binary: $JUPYTER_BIN"
 
           # ── Configurar Jupyter ────────────────────────────────────────
           mkdir -p /home/ec2-user/.jupyter
 
-          # Gerar hash da senha
-          PASS_HASH=$(python3 -c "from jupyter_server.auth import passwd; print(passwd('${JupyterPassword}'))")
+          PASS_HASH=$(python3.11 -c "from jupyter_server.auth import passwd; print(passwd('${JupyterPassword}'))")
 
-          cat > /home/ec2-user/.jupyter/jupyter_notebook_config.py <<EOF
+          cat > /home/ec2-user/.jupyter/jupyter_notebook_config.py <<JEOF
           c.ServerApp.ip = '0.0.0.0'
           c.ServerApp.port = 8888
           c.ServerApp.open_browser = False
-          c.ServerApp.password = '$PASS_HASH'
-          c.ServerApp.root_dir = '/home/ec2-user/AlingFit/exercises-dataset'
           c.ServerApp.allow_remote_access = True
-          EOF
+          c.ServerApp.password = '$PASS_HASH'
+          c.ServerApp.root_dir = '/home/ec2-user/exercises-dataset'
+          JEOF
 
           chown -R ec2-user:ec2-user /home/ec2-user/.jupyter
 
           # ── Criar serviço systemd para Jupyter ────────────────────────
-          cat > /etc/systemd/system/jupyter.service <<EOF
+          cat > /etc/systemd/system/jupyter.service <<SEOF
           [Unit]
           Description=Jupyter Notebook
           After=network.target
@@ -153,32 +210,18 @@ Resources:
           Type=simple
           User=ec2-user
           Environment="PATH=/usr/local/bin:/usr/bin:/bin"
-          WorkingDirectory=/home/ec2-user/AlingFit/exercises-dataset
-          ExecStart=/usr/local/bin/jupyter notebook
+          WorkingDirectory=/home/ec2-user/exercises-dataset
+          ExecStart=$JUPYTER_BIN notebook
           Restart=always
           RestartSec=10
 
           [Install]
           WantedBy=multi-user.target
-          EOF
+          SEOF
 
           systemctl daemon-reload
           systemctl enable jupyter
           systemctl start jupyter
-
-          # ── Instalar Grafana OSS ──────────────────────────────────────
-          dnf install -y https://dl.grafana.com/oss/release/grafana-11.0.0-1.x86_64.rpm || true
-
-          # ── Instalar plugin Infinity (leitura de JSON/CSV via URL/S3) ─
-          grafana-cli plugins install yesoreyeram-infinity-datasource || true
-
-          # ── Configurar Grafana para permitir acesso anônimo (leitura) ─
-          sed -i 's/;allow_embedding = false/allow_embedding = true/' /etc/grafana/grafana.ini
-
-          # ── Habilitar e iniciar Grafana ───────────────────────────────
-          systemctl daemon-reload
-          systemctl enable grafana-server
-          systemctl start grafana-server
 
           # ── Sinalizar que está pronto ─────────────────────────────────
           echo "TRAINING_INSTANCE_READY" > /home/ec2-user/ready.txt
@@ -205,7 +248,7 @@ Outputs:
 
   UploadModelsCommand:
     Description: Comando para subir modelos treinados para o bucket Models
-    Value: !Sub "aws s3 cp /home/ec2-user/AlingFit/exercises-dataset/models/ s3://model-s3-${AWS::AccountId}/ --recursive"
+    Value: !Sub "aws s3 cp /home/ec2-user/exercises-dataset/models/ s3://model-s3-${AWS::AccountId}/ --recursive"
 
   Terminate:
     Description: Deletar após terminar o treinamento (evitar custos)

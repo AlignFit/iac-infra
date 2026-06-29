@@ -1,0 +1,355 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "AlignFit — Monitoramento de análises de exercícios em tempo real",
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "VISÃO GERAL",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "alignfit-historico" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "fixedColor": "#73BF69", "mode": "fixed" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "#73BF69", "value": null }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 1 },
+      "id": 2,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["count"], "fields": "/.*file_id.*/", "values": false },
+        "textMode": "auto"
+      },
+      "title": "Total de Análises",
+      "type": "stat",
+      "targets": [
+        {
+          "columns": [
+            { "selector": "file_id", "text": "file_id", "type": "string" },
+            { "selector": "exercicio", "text": "exercicio", "type": "string" },
+            { "selector": "execucao", "text": "execucao", "type": "string" },
+            { "selector": "timestamp", "text": "timestamp", "type": "timestamp" },
+            { "selector": "mensagem", "text": "mensagem", "type": "string" }
+          ],
+          "format": "table",
+          "global_query_id": "",
+          "refId": "A",
+          "root_selector": "",
+          "source": "url",
+          "type": "json",
+          "url": "https://result-s3-936463224880.s3.us-east-1.amazonaws.com/results/historico.json",
+          "url_options": { "method": "GET" }
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "alignfit-historico" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "fixedColor": "#56A64B", "mode": "fixed" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "#56A64B", "value": null }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 4, "y": 1 },
+      "id": 3,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["count"], "fields": "/.*file_id.*/", "values": false },
+        "textMode": "auto"
+      },
+      "title": "Execuções Corretas",
+      "type": "stat",
+      "targets": [
+        {
+          "columns": [
+            { "selector": "file_id", "text": "file_id", "type": "string" },
+            { "selector": "execucao", "text": "execucao", "type": "string" }
+          ],
+          "format": "table",
+          "refId": "A",
+          "root_selector": "",
+          "source": "url",
+          "type": "json",
+          "url": "https://result-s3-936463224880.s3.us-east-1.amazonaws.com/results/historico.json",
+          "url_options": { "method": "GET" }
+        }
+      ],
+      "transformations": [
+        {
+          "id": "filterByValue",
+          "options": {
+            "filters": [
+              {
+                "fieldName": "execucao",
+                "config": { "id": "equal", "options": { "value": "correta" } }
+              }
+            ],
+            "type": "include",
+            "match": "all"
+          }
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "alignfit-historico" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "fixedColor": "#F2495C", "mode": "fixed" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "#F2495C", "value": null }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 8, "y": 1 },
+      "id": 4,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["count"], "fields": "/.*file_id.*/", "values": false },
+        "textMode": "auto"
+      },
+      "title": "Execuções com Erros",
+      "type": "stat",
+      "targets": [
+        {
+          "columns": [
+            { "selector": "file_id", "text": "file_id", "type": "string" },
+            { "selector": "execucao", "text": "execucao", "type": "string" }
+          ],
+          "format": "table",
+          "refId": "A",
+          "root_selector": "",
+          "source": "url",
+          "type": "json",
+          "url": "https://result-s3-936463224880.s3.us-east-1.amazonaws.com/results/historico.json",
+          "url_options": { "method": "GET" }
+        }
+      ],
+      "transformations": [
+        {
+          "id": "filterByValue",
+          "options": {
+            "filters": [
+              {
+                "fieldName": "execucao",
+                "config": { "id": "equal", "options": { "value": "errada" } }
+              }
+            ],
+            "type": "include",
+            "match": "all"
+          }
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "alignfit-historico" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "hideFrom": { "legend": false, "tooltip": false, "viz": false } }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 1 },
+      "id": 5,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "values": ["value", "percent"] },
+        "pieType": "donut",
+        "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false },
+        "tooltip": { "mode": "single" }
+      },
+      "title": "Por Exercício",
+      "type": "piechart",
+      "targets": [
+        {
+          "columns": [
+            { "selector": "exercicio", "text": "exercicio", "type": "string" }
+          ],
+          "format": "table",
+          "refId": "A",
+          "root_selector": "",
+          "source": "url",
+          "type": "json",
+          "url": "https://result-s3-936463224880.s3.us-east-1.amazonaws.com/results/historico.json",
+          "url_options": { "method": "GET" }
+        }
+      ],
+      "transformations": [
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "exercicio": { "aggregations": ["count"], "operation": "groupby" }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "alignfit-historico" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "hideFrom": { "legend": false, "tooltip": false, "viz": false } }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 1 },
+      "id": 6,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "values": ["value", "percent"] },
+        "pieType": "donut",
+        "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false },
+        "tooltip": { "mode": "single" }
+      },
+      "title": "Correta vs Errada",
+      "type": "piechart",
+      "targets": [
+        {
+          "columns": [
+            { "selector": "execucao", "text": "execucao", "type": "string" }
+          ],
+          "format": "table",
+          "refId": "A",
+          "root_selector": "",
+          "source": "url",
+          "type": "json",
+          "url": "https://result-s3-936463224880.s3.us-east-1.amazonaws.com/results/historico.json",
+          "url_options": { "method": "GET" }
+        }
+      ],
+      "transformations": [
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "execucao": { "aggregations": ["count"], "operation": "groupby" }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+      "id": 20,
+      "title": "HISTÓRICO COMPLETO",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "alignfit-historico" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": { "align": "auto", "displayMode": "auto", "inspect": false, "filterable": true },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green" }] }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "execucao" },
+            "properties": [
+              { "id": "custom.displayMode", "value": "color-background-solid" },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "correta": { "color": "dark-green", "text": "Correta" },
+                      "errada": { "color": "dark-red", "text": "Errada" }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "exercicio" },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "agachamento": { "text": "Agachamento" },
+                      "elevacao_lateral": { "text": "Elevação Lateral" },
+                      "biceps": { "text": "Rosca Direta" },
+                      "desenvolvimento": { "text": "Desenvolvimento" }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "file_id" },
+            "properties": [{ "id": "custom.width", "value": 310 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "timestamp" },
+            "properties": [{ "id": "custom.width", "value": 200 }]
+          }
+        ]
+      },
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 7 },
+      "id": 21,
+      "options": {
+        "footer": { "fields": "", "reducer": ["count"], "show": true },
+        "showHeader": true,
+        "sortBy": [{ "desc": true, "displayName": "timestamp" }]
+      },
+      "title": "Detalhes das Análises",
+      "type": "table",
+      "targets": [
+        {
+          "columns": [
+            { "selector": "timestamp", "text": "timestamp", "type": "string" },
+            { "selector": "exercicio", "text": "exercicio", "type": "string" },
+            { "selector": "execucao", "text": "execucao", "type": "string" },
+            { "selector": "mensagem", "text": "mensagem", "type": "string" },
+            { "selector": "file_id", "text": "file_id", "type": "string" }
+          ],
+          "format": "table",
+          "refId": "A",
+          "root_selector": "",
+          "source": "url",
+          "type": "json",
+          "url": "https://result-s3-936463224880.s3.us-east-1.amazonaws.com/results/historico.json",
+          "url_options": { "method": "GET" }
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["alignfit", "exercicios", "ml"],
+  "templating": { "list": [] },
+  "time": { "from": "now-7d", "to": "now" },
+  "timepicker": {
+    "refresh_intervals": ["10s", "30s", "1m", "5m"]
+  },
+  "timezone": "browser",
+  "title": "AlignFit — Análises de Exercícios",
+  "uid": "alignfit-overview",
+  "version": 1
+}
