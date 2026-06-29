@@ -1,0 +1,190 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >
+  EC2 para treinamento de modelos ML com Jupyter Notebook.
+  Inclui Python 3.11, scikit-learn, xgboost, pandas, ultralytics e o código do exercises-dataset.
+  Usa LabRole (conta AWS Academy).
+
+Parameters:
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+  InstanceType:
+    Type: String
+    Default: t3.large
+    AllowedValues:
+      - t3.medium
+      - t3.large
+      - t3.xlarge
+    Description: >
+      t3.large (2 vCPU, 8GB RAM) é suficiente para treinar XGBoost com datasets pequenos.
+      Use t3.xlarge se precisar processar muitos vídeos com YOLO.
+
+  GitRepoUrl:
+    Type: String
+    Description: URL HTTPS do repositório Git
+    Default: https://github.com/AlignFit/exercises-dataset.git
+
+  JupyterPassword:
+    Type: String
+    Description: Senha para acessar o Jupyter Notebook
+    Default: alignfit2026
+    NoEcho: true
+
+Resources:
+  ###########################################################
+  # SECURITY GROUP
+  ###########################################################
+
+  TrainingSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: AlignFit Training Instance - SSH + Jupyter
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8888
+          ToPort: 8888
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: AlignFitTrainingSG
+
+  ###########################################################
+  # EC2
+  ###########################################################
+
+  TrainingInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref AmiId
+      IamInstanceProfile: LabInstanceProfile
+      SecurityGroupIds:
+        - !Ref TrainingSecurityGroup
+
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 60
+            VolumeType: gp3
+            DeleteOnTermination: true
+
+      Tags:
+        - Key: Name
+          Value: AlignFitTrainingInstance
+
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -e
+
+          # ── Diretório temporário no disco (evita tmpfs em RAM) ────────
+          export TMPDIR=/var/tmp/pip-build
+          mkdir -p $TMPDIR
+
+          # ── Atualizar sistema ─────────────────────────────────────────
+          dnf update -y
+          dnf install -y python3.11 python3.11-pip git
+
+          # ── Usar python3.11 como padrão ───────────────────────────────
+          alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+          alternatives --set python3 /usr/bin/python3.11
+
+          # ── Instalar PyTorch CPU-only primeiro (evita download CUDA) ──
+          pip3.11 install --no-cache-dir \
+            torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+          # ── Instalar bibliotecas de ML ────────────────────────────────
+          pip3.11 install --no-cache-dir --ignore-installed \
+            jupyter \
+            notebook \
+            numpy==1.26.4 \
+            pandas==2.2.3 \
+            scikit-learn==1.5.2 \
+            "xgboost>=2.0.0" \
+            joblib \
+            matplotlib \
+            seaborn \
+            ultralytics==8.3.0 \
+            opencv-python-headless==4.10.0.84 \
+            boto3
+
+          # ── Limpar temporários para liberar espaço ────────────────────
+          rm -rf $TMPDIR /root/.cache/pip
+
+          # ── Clonar repositório ────────────────────────────────────────
+          cd /home/ec2-user
+          git clone ${GitRepoUrl} AlingFit || true
+          chown -R ec2-user:ec2-user AlingFit
+
+          # ── Configurar Jupyter ────────────────────────────────────────
+          mkdir -p /home/ec2-user/.jupyter
+
+          # Gerar hash da senha
+          PASS_HASH=$(python3 -c "from jupyter_server.auth import passwd; print(passwd('${JupyterPassword}'))")
+
+          cat > /home/ec2-user/.jupyter/jupyter_notebook_config.py <<EOF
+          c.ServerApp.ip = '0.0.0.0'
+          c.ServerApp.port = 8888
+          c.ServerApp.open_browser = False
+          c.ServerApp.password = '$PASS_HASH'
+          c.ServerApp.root_dir = '/home/ec2-user/AlingFit/exercises-dataset'
+          c.ServerApp.allow_remote_access = True
+          EOF
+
+          chown -R ec2-user:ec2-user /home/ec2-user/.jupyter
+
+          # ── Criar serviço systemd para Jupyter ────────────────────────
+          cat > /etc/systemd/system/jupyter.service <<EOF
+          [Unit]
+          Description=Jupyter Notebook
+          After=network.target
+
+          [Service]
+          Type=simple
+          User=ec2-user
+          Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+          WorkingDirectory=/home/ec2-user/AlingFit/exercises-dataset
+          ExecStart=/usr/local/bin/jupyter notebook
+          Restart=always
+          RestartSec=10
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+          systemctl daemon-reload
+          systemctl enable jupyter
+          systemctl start jupyter
+
+          # ── Sinalizar que está pronto ─────────────────────────────────
+          echo "TRAINING_INSTANCE_READY" > /home/ec2-user/ready.txt
+          chown ec2-user:ec2-user /home/ec2-user/ready.txt
+
+Outputs:
+  InstanceId:
+    Value: !Ref TrainingInstance
+
+  PublicIp:
+    Value: !GetAtt TrainingInstance.PublicIp
+
+  JupyterUrl:
+    Description: URL do Jupyter Notebook (aguardar 3-5 min após o deploy)
+    Value: !Sub http://${TrainingInstance.PublicIp}:8888
+
+  SSMConnect:
+    Description: Conectar via SSM (sem chave SSH)
+    Value: !Sub "aws ssm start-session --target ${TrainingInstance}"
+
+  UploadModelsCommand:
+    Description: Comando para subir modelos treinados para o bucket Models
+    Value: !Sub "aws s3 cp /home/ec2-user/AlingFit/exercises-dataset/models/ s3://models-bucket-${AWS::AccountId}/ --recursive"
+
+  Terminate:
+    Description: Deletar após terminar o treinamento (evitar custos)
+    Value: !Sub "aws ec2 terminate-instances --instance-ids ${TrainingInstance}"

@@ -42,7 +42,7 @@ RESULTS_BUCKET = os.environ.get("RESULTS_BUCKET")
 EXERCISE_MODEL_KEYS = {
     "agachamento":      "modelo-de-classificacao-de-execucao-agachamento.pkl",
     "biceps":           "modelo-de-classificacao-de-execucao-biceps.pkl",
-    "elevacaoLateral":  "modelo-de-classificacao-de-execucao-elevacao-lateral.pkl",
+    "elevacao_lateral": "modelo-de-classificacao-de-execucao-elevacao-lateral.pkl",
     "desenvolvimento":  "modelo-de-classificacao-de-execucao-desenvolvimento.pkl",
 }
 
@@ -180,14 +180,24 @@ def lambda_handler(event, context):
         # SALVAR RESULTADO
         # -----------------------------------------------------
 
+        # Labels amigáveis para a mensagem ao usuário
+        exercise_friendly = {
+            "agachamento":      "Agachamento",
+            "biceps":           "Rosca Direta",
+            "elevacao_lateral": "Elevação Lateral",
+            "desenvolvimento":  "Desenvolvimento de Ombro",
+        }
+
+        friendly_name = exercise_friendly.get(exercise_name, exercise_name)
+
         result = {
             "file_id":   file_id,
             "status":    "success",
             "exercicio": exercise_name,
             "execucao":  execution,
             "mensagem":  (
-                f"Exercício identificado: {exercise_name}. "
-                f"Execução {'correta!' if execution == 'correta' else 'com erros — revise a técnica.'}"
+                f"Exercício identificado: {friendly_name}. "
+                f"Execução {'correta!' if execution == 'correta' else 'com erros. Revise a técnica do exercício.'}"
             ),
         }
 
